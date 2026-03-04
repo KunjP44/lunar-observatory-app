@@ -1,8 +1,11 @@
 from datetime import date, timedelta, datetime
 from typing import List
 
-from backend.moon.logic import get_moon_data
-from backend.events.models import Event
+# from backend.moon.logic import get_moon_data
+# from backend.events.models import Event
+
+from moon.logic import get_moon_data
+from events.models import Event
 
 from skyfield.api import load
 import math

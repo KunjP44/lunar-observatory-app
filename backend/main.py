@@ -1,11 +1,13 @@
 from backend.database import get_all_tokens
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Body
 from pydantic import BaseModel
 import datetime
 import pytz
 from contextlib import asynccontextmanager
+import os
 
 from datetime import date, timedelta
 from backend.visibility.engine import compute_visibility, VISIBILITY_CACHE
@@ -88,6 +90,12 @@ async def lifespan(app: FastAPI):
 
 
 api = FastAPI(lifespan=lifespan)
+# ================= STATIC YEAR BUNDLES =================
+api.mount(
+    "/bundles",
+    StaticFiles(directory="static/bundles"),
+    name="bundles",
+)
 
 init_db()
 
@@ -168,3 +176,28 @@ def debug_tokens():
 @api.api_route("/", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
+
+
+# ================= LATEST YEAR META =================
+
+
+@api.get("/api/meta/latest-year")
+def latest_year():
+
+    bundle_path = "static/bundles"
+
+    if not os.path.exists(bundle_path):
+        return {"latest_year": 2026}
+
+    files = os.listdir(bundle_path)
+
+    years = [
+        int(f.split("_")[1])
+        for f in files
+        if f.startswith("year_") and f.endswith(".json")
+    ]
+
+    if not years:
+        return {"latest_year": 2026}
+
+    return {"latest_year": max(years)}
