@@ -80,10 +80,6 @@ async def lifespan(app: FastAPI):
 
         print("🚀 Event preload finished.")
 
-    # 🔥 THIS LINE IS THE FIX
-    asyncio.create_task(preload_visibility_background())
-    asyncio.create_task(preload_events_background())
-
     yield
 
     print("🛑 Shutdown complete")
