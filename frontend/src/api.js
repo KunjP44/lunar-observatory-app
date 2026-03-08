@@ -27,3 +27,11 @@ export async function fetchPlanetPositions(date) {
     const data = await res.json();
     return data.positions;
 }
+
+export async function fetchVisibility() {
+    return {};
+}
+
+export async function fetchEventsForYear() {
+    return [];
+}

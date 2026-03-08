@@ -10,7 +10,7 @@ const VERSION_URL =
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { loadInfoCard } from "./infoCard.js";
-import { fetchMoonData, fetchPlanetPositions, fetchVisibility } from "./api.js";
+import { fetchMoonData, fetchPlanetPositions, fetchVisibility, fetchEventsForYear } from "./api.js";
 import { initLearnMode } from "./learn.js";
 function getLocalNotifications() {
     return window.Capacitor?.Plugins?.LocalNotifications || null;
