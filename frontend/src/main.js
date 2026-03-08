@@ -1,12 +1,7 @@
-const ASSET_BASE = "/";
+const ASSET_BASE = "./frontend/";
 const IS_LOCAL =
     location.hostname === "localhost" ||
     location.hostname === "127.0.0.1";
-
-// ================= APP VERSION =================
-const CURRENT_APP_VERSION = "1.1.0";
-const VERSION_URL =
-    "https://raw.githubusercontent.com/KunjP44/lunar-observatory-meta/main/version.json";
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { loadInfoCard } from "./infoCard.js";
@@ -1261,6 +1256,8 @@ function focusOn(obj) {
     cameraMode = "focus";
     focusObject = obj;
     solarPaused = true;
+    loadInfoCard(obj.userData.id);
+    infoCard.classList.remove("hidden");
 
     // REMOVED: loadInfoCard and classList removal
 
@@ -2286,124 +2283,5 @@ function capitalize(str) {
             setTimeout(() => loaderUI.remove(), 800);
         }
     }
-    checkForAppUpdate();
 
 })();
-
-// ================= VERSION CHECK =================
-
-async function checkForAppUpdate() {
-
-    try {
-
-        const res = await fetch(VERSION_URL);
-        const data = await res.json();
-
-        if (data.latest_version !== CURRENT_APP_VERSION) {
-
-            showUpdateBanner(data.message);
-
-        }
-
-    } catch (e) {
-
-        console.log("Version check failed:", e);
-
-    }
-}
-
-function showUpdateBanner(message) {
-
-    // prevent duplicates
-    if (document.getElementById("update-card")) return;
-
-    const card = document.createElement("div");
-    card.id = "update-card";
-
-    card.style.position = "fixed";
-    card.style.bottom = "-160px";
-    card.style.left = "50%";
-    card.style.transform = "translateX(-50%)";
-    card.style.width = "90%";
-    card.style.maxWidth = "420px";
-    card.style.background = "rgba(12,18,38,0.96)";
-    card.style.color = "#fff";
-    card.style.borderRadius = "18px";
-    card.style.padding = "16px";
-    card.style.boxShadow = "0 12px 40px rgba(0,0,0,0.45)";
-    card.style.zIndex = "9999";
-    card.style.transition = "bottom 0.45s cubic-bezier(.2,.9,.3,1)";
-    card.style.fontFamily = "system-ui";
-
-    card.innerHTML = `
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-            <div style="
-                width:36px;
-                height:36px;
-                border-radius:10px;
-                background:#4da3ff;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                font-size:18px">
-                🚀
-            </div>
-
-            <div style="font-weight:600;font-size:15px">
-                Update Available
-            </div>
-        </div>
-
-        <div style="font-size:13px;opacity:0.8;margin-bottom:14px">
-            ${message}
-        </div>
-
-        <div style="display:flex;gap:10px">
-
-            <button id="update-later"
-            style="
-                flex:1;
-                padding:8px;
-                border-radius:10px;
-                border:none;
-                background:#222;
-                color:white;
-                font-size:13px;">
-                Later
-            </button>
-
-            <button id="update-now"
-            style="
-                flex:1;
-                padding:8px;
-                border-radius:10px;
-                border:none;
-                background:#4da3ff;
-                color:white;
-                font-weight:600;
-                font-size:13px;">
-                Update
-            </button>
-
-        </div>
-    `;
-
-    document.body.appendChild(card);
-
-    // slide up animation
-    requestAnimationFrame(() => {
-        card.style.bottom = "30px";
-    });
-
-    document.getElementById("update-later").onclick = () => {
-        card.style.bottom = "-200px";
-        setTimeout(() => card.remove(), 400);
-    };
-
-    document.getElementById("update-now").onclick = () => {
-        window.open(
-            "https://github.com/KunjP44/lunar-observatory/releases",
-            "_blank"
-        );
-    };
-}
