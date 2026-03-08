@@ -6,10 +6,10 @@
     <title>Lunar Observatory</title>
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <link rel="manifest" href="./frontend/manifest.json">
-    <link rel="stylesheet" href="./frontend/styles/ui.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="./styles/ui.css">
     <!-- <link rel="icon" type="image/svg+xml" href="./frontend/assets/logo.svg"> -->
-    <link rel="icon" type="image/svg+xml" href="./frontend/assets/logo-web-cir.svg">
+    <link rel="icon" type="image/svg+xml" href="/assets/logo-web-cir.svg">
 
     <meta name="theme-color" content="#000000">
 
@@ -20,8 +20,23 @@
     <div id="env-gradient"></div>
 
     <div id="loader">
+        <svg class="loader-logo" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            <path d="M2 12h20"></path>
+        </svg>
         <div class="loader-spinner"></div>
-        <div class="loader-text">Initializing Observatory</div>
+        <div class="loader-text">Loading Universe Data...</div>
+    </div>
+
+    <div id="screen-skeleton" class="hidden">
+        <div class="skeleton-content">
+            <div class="skeleton-title"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line short"></div>
+        </div>
     </div>
 
     <div class="mode-switch-container">
@@ -384,105 +399,48 @@
     <!-- Intelligence Log Panel -->
     <div id="events-panel" class="events-panel">
         <div class="events-header">
-            <span id="panel-title">SYSTEM ALERTS</span>
-            <button id="mark-all-read" class="panel-icon-btn" title="Mark all as read">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                    <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                </svg>
-            </button>
-            <div class="header-actions">
-                <button id="btn-view-events" class="panel-icon-btn" title="Intelligence Log">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="8" y1="6" x2="21" y2="6"></line>
-                        <line x1="8" y1="12" x2="21" y2="12"></line>
-                        <line x1="8" y1="18" x2="21" y2="18"></line>
-                        <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                        <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                        <line x1="3" y1="18" x2="3.01" y2="18"></line>
-                    </svg>
-                </button>
-                <button id="btn-view-settings" class="panel-icon-btn" title="Settings">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path
-                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-                        </path>
-                    </svg>
-                </button>
-                <button id="close-events" class="panel-icon-btn">✕</button>
+            <div class="panel-segmented-control">
+                <button id="tab-alerts" class="panel-tab active">Alerts</button>
+                <button id="tab-events" class="panel-tab">Sky Events</button>
             </div>
+            <button id="close-events" class="panel-close">✕</button>
         </div>
 
         <div id="view-notifications" class="panel-content-view">
-            <div class="dev-notice">
-                <div class="dev-notice-icon">🚧</div>
-                <div class="dev-notice-text">
-                    <div class="dev-notice-title">Under Development</div>
-                    <div class="dev-notice-desc">
-                        Push notifications are currently in testing.
-                        Alerts may not behave consistently and certain data
-                        may load slower as we continue improving performance.
-                    </div>
-                </div>
+            <div class="panel-section-header">
+                <span class="section-title">Recent Alerts</span>
+                <button id="mark-all-read" class="text-btn">Clear All</button>
             </div>
+
             <div class="notifications-list" id="notifications-container">
                 <div class="empty-state">
                     <span style="font-size: 24px; display:block; margin-bottom:10px;">🔕</span>
                     No new alerts
                 </div>
             </div>
+
+            <div class="settings-inline">
+                <div class="setting-row-toggle">
+                    <div class="setting-text">
+                        <span class="setting-label">Daily Briefings</span>
+                        <span class="setting-desc">Receive scheduled planetary updates.</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-notifications">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <button id="disable-notifications" class="text-btn-danger">Open OS Permissions</button>
+            </div>
         </div>
 
         <div id="view-events-log" class="panel-content-view hidden">
-            <button class="panel-back-btn" id="back-to-notifications-events">
-                ← Back
-            </button>
             <div id="events-year-label" class="events-year-label"></div>
             <div id="events-container" class="events-container"></div>
         </div>
-
-        <div id="view-settings" class="panel-content-view hidden">
-            <button class="panel-back-btn" id="back-to-notifications-settings">
-                ← Back
-            </button>
-            <div class="settings-container">
-                <h3 class="settings-title">Push Preferences</h3>
-
-                <div class="setting-row-toggle">
-                    <div class="setting-text">
-                        <span class="setting-label">Daily Brief</span>
-                        <span class="setting-desc">Get a 8 AM summary of today's celestial events.</span>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-daily-brief">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-
-                <div class="setting-row-toggle">
-                    <div class="setting-text">
-                        <span class="setting-label">Planet Visibility</span>
-                        <span class="setting-desc">Alerts when planets reach peak visibility.</span>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-planet-brief">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-
-                <div class="setting-row spacer-top">
-                    <button class="date-btn secondary full-width" id="disable-notifications">
-                        Reset All Permissions
-                    </button>
-                </div>
-            </div>
-        </div>
     </div>
 
-    <script type="module" src="./frontend/src/main.js"></script>
+    <script type="module" src="./src/main.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 </body>

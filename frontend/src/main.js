@@ -3,16 +3,60 @@ const IS_LOCAL =
     location.hostname === "localhost" ||
     location.hostname === "127.0.0.1";
 
-const API_BASE = IS_LOCAL
-    ? "http://127.0.0.1:8000"
-    : "https://lunar-observatory.onrender.com"; // we will deploy here
+// ================= APP VERSION =================
+const CURRENT_APP_VERSION = "1.1.0";
+const VERSION_URL =
+    "https://raw.githubusercontent.com/KunjP44/lunar-observatory-meta/main/version.json";
 
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { loadInfoCard } from "./infoCard.js";
-import { fetchMoonData, fetchPlanetPositions } from "./api.js";
+import { fetchMoonData, fetchPlanetPositions, fetchVisibility, fetchEventsForYear } from "./api.js";
 import { initLearnMode } from "./learn.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
+import { FACTS } from "./facts.js";
+function getLocalNotifications() {
+    return window.Capacitor?.Plugins?.LocalNotifications || null;
+}
+
+function getDailyFact() {
+
+    const today = new Date();
+    const start = new Date(today.getFullYear(), 0, 0);
+
+    const diff = today - start;
+    const day = Math.floor(diff / 86400000);
+
+    return FACTS[day % FACTS.length];
+}
+
+function getTonightSkyMessage() {
+
+    const phase = document.getElementById("ui-phase")?.textContent || "Moon";
+    const illum = document.getElementById("ui-illum")?.textContent || "";
+
+    let planetLine = "";
+
+    if (todayVisibilityData && Object.keys(todayVisibilityData).length > 0) {
+
+        const excellentPlanets = [];
+
+        for (const [name, info] of Object.entries(todayVisibilityData)) {
+            if (info.visibility_rating === "Excellent") {
+                excellentPlanets.push(
+                    name.charAt(0).toUpperCase() + name.slice(1)
+                );
+            }
+        }
+
+        if (excellentPlanets.length > 0) {
+            planetLine = `\n\n🪐 Excellent Viewing: ${excellentPlanets.join(" • ")}`;
+        }
+    }
+
+    return `${phase}
+Illumination: ${illum}${planetLine}
+
+Look up after sunset 🔭`;
+}
 
 window.addEventListener("error", e => {
     console.error("GLOBAL ERROR:", e.message);
@@ -27,8 +71,117 @@ const isNativeApp =
     window.Capacitor.isNativePlatform &&
     window.Capacitor.isNativePlatform();
 
+const API_BASE =
+    isNativeApp
+        ? "https://lunar-observatory.onrender.com"
+        : (location.hostname === "localhost" ||
+            location.hostname === "127.0.0.1")
+            ? "http://127.0.0.1:8000"
+            : "https://lunar-observatory.onrender.com";
+
 console.log("Is Native App:", isNativeApp);
 
+let lastBackPress = 0;
+if (
+    typeof window !== "undefined" &&
+    window.Capacitor &&
+    window.Capacitor.isNativePlatform &&
+    window.Capacitor.isNativePlatform() &&
+    window.Capacitor.Plugins &&
+    window.Capacitor.Plugins.App
+) {
+
+    const App = window.Capacitor.Plugins.App;
+
+    App.addListener('backButton', () => {
+        console.log("Native Back gesture triggered");
+
+        // 1. Close Modals & Popups First
+        const eventsPanel = document.getElementById("events-panel");
+        if (eventsPanel?.classList.contains("show")) {
+            document.getElementById("close-events").click();
+            return;
+        }
+
+        const datePicker = document.getElementById("solar-date-picker");
+        if (datePicker && !datePicker.classList.contains("hidden")) {
+            document.getElementById("solar-cancel-date").click();
+            return;
+        }
+
+        const infoCard = document.getElementById("info-card");
+        if (infoCard && !infoCard.classList.contains("hidden")) {
+            document.getElementById("close-card").click();
+            return;
+        }
+
+        // 2. Handle Learn Mode Hierarchy
+        const learnDetail = document.getElementById("learn-detail");
+        if (learnDetail && !learnDetail.classList.contains("hidden")) {
+            // Close the specific lesson
+            document.getElementById("learn-back-btn")?.click();
+            return;
+        }
+
+        if (uiPage === "learn") {
+            exitLearnMode();
+            return;
+        }
+
+        // 3. Handle Lunar Mode
+        if (uiPage === "lunar") {
+            resetToSolar();
+            return;
+        }
+
+        // 4. Handle Focus Mode (Solar)
+        if (cameraMode === "focus") {
+            exitFocus();
+            return;
+        }
+
+        // 5. Default App Exit
+        const now = Date.now();
+        if (now - lastBackPress < 2000) {
+            App.exitApp();
+        } else {
+            lastBackPress = now;
+            showExitToast();
+        }
+    });
+}
+
+function showExitToast() {
+
+    let toast = document.getElementById("exit-toast");
+
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "exit-toast";
+        toast.textContent = "Press back again to exit";
+
+        toast.style.position = "fixed";
+        toast.style.bottom = "30px";
+        toast.style.left = "50%";
+        toast.style.transform = "translateX(-50%)";
+        toast.style.background = "rgba(0,0,0,0.8)";
+        toast.style.color = "#fff";
+        toast.style.padding = "10px 20px";
+        toast.style.borderRadius = "20px";
+        toast.style.fontSize = "14px";
+        toast.style.zIndex = "9999";
+        toast.style.opacity = "0";
+        toast.style.transition = "opacity 0.3s ease";
+
+        document.body.appendChild(toast);
+    }
+
+    toast.style.opacity = "1";
+
+    setTimeout(() => {
+        toast.style.opacity = "0";
+    }, 1500);
+}
 // ============================== LOGIC CONTROLLER ==============================
 let targetPhaseAngle = 0; // from backend (degrees)
 let visualPhaseAngle = 0; // smoothed (degrees)
@@ -74,8 +227,17 @@ const BACKEND_SYNC_MS = 60 * 1000; // sync every 1 simulated minute
 let lastBackendSyncMs = 0;
 const dateInput = document.getElementById("date-input");
 let currentDate = new Date(); // UI reference date
+let todayVisibilityData = null;
 const MS_PER_REAL_SECOND = 1000; // real milliseconds
 const MS_PER_SIM_SECOND = 1000;  // 1× = real-time
+
+function showScreenSkeleton() {
+    document.getElementById("screen-skeleton")?.classList.remove("hidden");
+}
+
+function hideScreenSkeleton() {
+    document.getElementById("screen-skeleton")?.classList.add("hidden");
+}
 
 
 async function loadMoonForDate(dateObj) {
@@ -88,6 +250,118 @@ async function loadMoonForDate(dateObj) {
     }
 }
 
+async function requestNotificationPermission() {
+
+    const LocalNotifications = getLocalNotifications();
+
+    if (!LocalNotifications) {
+        console.log("LocalNotifications not available yet");
+        return false;
+    }
+
+    const perm = await LocalNotifications.requestPermissions();
+
+    return perm.display === "granted";
+}
+async function scheduleDailyNotifications() {
+    const LocalNotifications = getLocalNotifications();
+    if (!LocalNotifications) return;
+
+    await cancelDailyNotifications(); // Clean the slate first
+
+    const notifications = [];
+
+    // 1. Tonight's Sky (Repeats daily at 19:30)
+    const skyMsg = getTonightSkyMessage();
+    notifications.push({
+        id: 2,
+        title: "🔭 Tonight's Sky",
+        body: "Planets are visible tonight. Expand to see details!", // Short summary
+        largeBody: skyMsg, // FULL text shown when expanded
+        smallIcon: "notification",
+        schedule: {
+            on: { hour: 19, minute: 30 },
+            repeats: true
+        }
+    });
+
+    // 2. 30-Day Fact Scheduler (Every morning at 8:00 AM)
+    const now = new Date();
+    let daysAdded = now.getHours() >= 8 ? 1 : 0; // If past 8AM, start from tomorrow
+
+    for (let i = 0; i < 30; i++) {
+        const factDate = new Date(now);
+        factDate.setDate(now.getDate() + daysAdded + i);
+        factDate.setHours(8, 0, 0, 0);
+
+        // Get a specific fact based on the day of the year
+        const start = new Date(factDate.getFullYear(), 0, 0);
+        const diff = factDate - start;
+        const dayOfYear = Math.floor(diff / 86400000);
+        const specificFact = FACTS[dayOfYear % FACTS.length];
+
+        notifications.push({
+            id: 100 + i,
+            title: "✨ Fact of the Day",
+            body: specificFact,
+            largeBody: specificFact, // Prevents truncation for long facts
+            smallIcon: "notification",
+            schedule: { at: factDate }
+        });
+    }
+
+    await LocalNotifications.schedule({ notifications });
+}
+
+async function testNotifications() {
+    const LocalNotifications = getLocalNotifications();
+    if (!LocalNotifications) return;
+
+    const skyMsg = getTonightSkyMessage();
+    const factMsg = getDailyFact();
+
+    await LocalNotifications.schedule({
+        notifications: [
+            {
+                id: 9001,
+                title: "🌌 Astronomy Fact",
+                body: factMsg,
+                largeBody: factMsg, // Added largeBody
+                smallIcon: "notification",
+                schedule: { at: new Date(Date.now() + 5000) }
+            },
+            {
+                id: 9002,
+                title: "🔭 Tonight's Sky",
+                body: "Planets are visible tonight. Expand to see details!",
+                largeBody: skyMsg, // Added largeBody
+                smallIcon: "notification",
+                schedule: { at: new Date(Date.now() + 8000) }
+            },
+            {
+                id: 9003,
+                title: "🌠 Astronomy Event",
+                body: "Perseid Meteor Shower Peak. Expand for more.",
+                largeBody: "The Perseid Meteor Shower is peaking tonight. Look up after midnight for the best views!", // Added largeBody
+                smallIcon: "notification",
+                schedule: { at: new Date(Date.now() + 11000) }
+            }
+        ]
+    });
+}
+
+window.testNotifications = testNotifications;
+
+async function cancelDailyNotifications() {
+    const LocalNotifications = getLocalNotifications();
+    if (!LocalNotifications) return;
+
+    // Create an array of all possible IDs to cancel (1, 2, 999, and the 30-day facts 100-130)
+    const toCancel = [{ id: 1 }, { id: 2 }, { id: 999 }];
+    for (let i = 0; i < 30; i++) toCancel.push({ id: 100 + i });
+
+    await LocalNotifications.cancel({ notifications: toCancel });
+}
 
 // Event Listeners for Date Picker
 document.getElementById("open-date-picker").onclick = () => {
@@ -161,14 +435,16 @@ function startTimeTravelAnimation(diffMs) {
 /* =====================================================
 THREE.JS ENGINE
 ===================================================== */
+let isMobile = window.innerWidth < 768 || isNativeApp || /Mobi|Android|iPhone/i.test(navigator.userAgent);
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: true,
     powerPreference: "high-performance",
 });
+// 1.25 is the sweet spot for crisp mobile rendering without GPU lag
+renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.25) : Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.domElement.style.zIndex = "0";
 document.body.appendChild(renderer.domElement);
@@ -198,7 +474,6 @@ let focusMaxRadius = 120;
 let uiPage = "solar";
 let focusObject = null;
 let solarPaused = false;
-let isMobile = window.innerWidth < 768;
 const MOON_SCALE = isMobile ? 33 : 40;
 const LUNAR_OFFSET_DESKTOP = new THREE.Vector3(9, 0, 0);
 const LUNAR_OFFSET_MOBILE = new THREE.Vector3(0, 0, 0);
@@ -256,7 +531,8 @@ lunarSpotlight.visible = false;
 
 
 const starGeo = new THREE.BufferGeometry();
-const starPos = new Float32Array(6000 * 3);
+// const starPos = new Float32Array(6000 * 3);
+const starPos = new Float32Array((isMobile ? 1000 : 6000) * 3);
 for (let i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 10000;
 starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
 const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 1, color: 0xffffff, sizeAttenuation: false }));
@@ -267,9 +543,20 @@ SYSTEM SETUP
 ===================================================== */
 const loader = new THREE.TextureLoader();
 
+// Fetch maximum hardware filtering capability
+const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+
 const tex = (f) => {
-    const t = loader.load(`${ASSET_BASE}textures/${f}`);
+    const path = isMobile
+        ? `${ASSET_BASE}textures/mobile/${f}`
+        : `${ASSET_BASE}textures/${f}`;
+
+    const t = loader.load(path);
     t.colorSpace = THREE.SRGBColorSpace;
+
+    // FIX: Sharpens low-res textures significantly when viewed on a 3D curve
+    t.anisotropy = maxAnisotropy;
+
     return t;
 };
 
@@ -295,12 +582,13 @@ let moonAngle = Math.random() * Math.PI * 2;
 
 const planetMeshes = {};
 const planetAngles = {};
+const clickableObjects = [];
 const orbitLines = [];
 let asteroidBelt = null;
 let kuiperBelt = null;
 
 const sun = new THREE.Mesh(
-    new THREE.SphereGeometry(22, 64, 64),
+    new THREE.SphereGeometry(22, isMobile ? 32 : 64, isMobile ? 32 : 64),
     new THREE.MeshStandardMaterial({
         map: tex("sun.jpg"),
         roughness: 1,
@@ -319,8 +607,24 @@ for (const name in PLANETS) {
         ? new THREE.MeshStandardMaterial({ map: tex("earth-day.jpg"), emissiveMap: tex("earth-night.jpg"), emissiveIntensity: 0.7 })
         : new THREE.MeshStandardMaterial({ map: tex(`${name.toLowerCase()}.jpg`) });
 
-    // const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r, 48, 48), mat);
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r || 1, 48, 48), mat);
+    const segments = isMobile ? 32 : 48;
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r || 1, segments, segments), mat);
+
+    const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
+    const hitbox = new THREE.Mesh(new THREE.SphereGeometry((p.r || 1) * 3, 8, 8), hitboxMat);
+
+    // Trick the raycaster to register clicks without rendering it graphically
+    hitbox.raycast = function (raycaster, intersects) {
+        this.material.visible = true;
+        THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+        this.material.visible = false;
+    };
+
+    hitbox.userData.id = name.toLowerCase();
+    mesh.add(hitbox);
+
+    hitbox.userData.id = name.toLowerCase();
+
     mesh.userData.id = name.toLowerCase();
     scene.add(mesh);
 
@@ -329,6 +633,7 @@ for (const name in PLANETS) {
     mesh.scale.setScalar(PLANET_SIZE_SCALE);
     // mesh.scale.multiplyScalar(2.5);
     planetMeshes[name] = mesh;
+    clickableObjects.push(mesh);
     // ================= SATURN RINGS =================
     if (name === "Saturn") {
 
@@ -382,6 +687,9 @@ for (const name in PLANETS) {
 asteroidBelt = createAsteroidBelt();
 kuiperBelt = createKuiperBelt();
 
+asteroidBelt.visible = false;
+kuiperBelt.visible = false;
+
 // ================= NEW UI LOGIC =================
 
 // 1. Open Picker
@@ -399,6 +707,7 @@ document.getElementById("solar-cancel-date")?.addEventListener("click", () => {
 
 // 3. Apply (Warp)
 document.getElementById("solar-apply-date")?.addEventListener("click", async () => {
+
     const input = document.getElementById("solar-date-input");
     if (!input.value) return;
 
@@ -407,13 +716,13 @@ document.getElementById("solar-apply-date")?.addEventListener("click", async () 
     isTimeTraveling = false;
 
     const newDate = new Date(input.value);
+    showScreenSkeleton();
     const diffMs = newDate - simDate;
     const diffDays = Math.abs(diffMs / (1000 * 60 * 60 * 24));
 
     document.getElementById("solar-date-picker").classList.add("hidden");
 
     if (diffDays > TIME_TRAVEL_THRESHOLD_DAYS) {
-
         // 🚀 Let time travel system control pause/resume
         startTimeTravelAnimation(diffMs);
 
@@ -426,8 +735,17 @@ document.getElementById("solar-apply-date")?.addEventListener("click", async () 
         simDate = new Date(newDate);
         currentDate = new Date(newDate);
 
-        await loadMoonForDate(newDate);
-        await loadSolarForDate(newDate);
+        try {
+
+            await loadMoonForDate(newDate);
+            await loadSolarForDate(newDate);
+            await loadPlanetVisibilityForDate(newDate);
+
+        } finally {
+
+            hideScreenSkeleton();
+
+        }
 
         updateDateDisplay();
 
@@ -528,6 +846,13 @@ let lastX = 0, lastY = 0;
 let lastTap = 0;
 const pointer = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
+
+// MUCH easier to tap planets
+raycaster.params.Points = { threshold: 10 };
+raycaster.params.Line = { threshold: 10 };
+
+// also increase mesh precision
+raycaster.params.Mesh = { threshold: 0.5 };
 const canvas = renderer.domElement;
 let singleTapTimeout = null;
 
@@ -577,9 +902,9 @@ canvas.addEventListener("mousemove", (e) => {
     pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
 
-    if (!isMouseDown) {
+    if (!isMouseDown && frameCount % 15 === 0) {
         // Just hovering? Show pointer if over object
-        const hits = raycaster.intersectObjects(Object.values(planetMeshes), true);
+        const hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
         let validHit = false;
         for (const h of hits) {
             if (h.object.visible) {
@@ -593,17 +918,20 @@ canvas.addEventListener("mousemove", (e) => {
     }
 
     // If mouse is down and moving, we are dragging
-    isDragging = true;
 
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
+    if (!isDragging && Math.abs(dx) < 5 && Math.abs(dy) < 5) {
+        return;
+    }
+    isDragging = true;
 
     if (cameraMode === "lunar" && draggingMoon) {
         planetMeshes.moon.rotation.y += dx * 0.007;
     } else if (cameraMode !== "lunar") {
         // Update TARGETS instead of actual values to allow smoothing
-        targetTheta -= dx * 0.005;
-        targetPhi -= dy * 0.005;
+        targetTheta += dx * 0.0012;
+        targetPhi += dy * 0.0012;
 
         // Clamp the target immediately so we don't flip over
         targetPhi = THREE.MathUtils.clamp(targetPhi, 0.1, Math.PI - 0.1);
@@ -614,32 +942,34 @@ canvas.addEventListener("mousemove", (e) => {
 
 // 4. Double Click: FOCUS LOGIC
 canvas.addEventListener("dblclick", (e) => {
+    isDragging = false;
     if (uiPage !== "solar") return;
-
-    canvas.addEventListener("click", (e) => {
-        if (uiPage !== "solar") return;
-
-        // Ignore click if it was part of a drag
-        if (isDragging) return;
-
-        handleSingleTap(e.clientX, e.clientY);
-    });
 
     pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
     raycaster.setFromCamera(pointer, camera);
 
-    const hits = raycaster.intersectObjects(Object.values(planetMeshes), true);
+    let hits = raycaster.intersectObjects(clickableObjects, true)
+        .filter(h => h.object.visible);
+
+    // fallback detection
+    if (hits.length === 0) {
+        const fallback = findNearestPlanet(e.clientX, e.clientY);
+        if (fallback) hits = [{ object: fallback }];
+    }
 
     if (hits.length > 0) {
+
         let obj = hits[0].object;
-        while (obj.parent && !obj.userData.id) obj = obj.parent;
+
+        while (obj.parent && !obj.userData.id) {
+            obj = obj.parent;
+        }
 
         if (obj.userData.id) {
             focusOn(obj);
         }
-    } else {
-        exitFocus();
     }
 });
 
@@ -677,6 +1007,11 @@ canvas.addEventListener("touchstart", (e) => {
             // --- DOUBLE TAP DETECTED ---
             e.preventDefault();
             clearTimeout(singleTapTimeout);
+
+            // FIX: Explicitly cancel dragging so the second tap doesn't rotate the scene
+            isDragging = false;
+            isPinching = false;
+
             handleDoubleTap(e.touches[0].clientX, e.touches[0].clientY);
             lastTap = 0;
         } else {
@@ -715,7 +1050,7 @@ canvas.addEventListener("touchstart", (e) => {
 
 
 canvas.addEventListener("touchmove", (e) => {
-    e.preventDefault(); // Prevent scrolling
+    if (e.cancelable) e.preventDefault()
 
     // --- ROTATION (1 Finger) ---
     if (e.touches.length === 1 && !isPinching && !isTimeTraveling) {
@@ -728,7 +1063,7 @@ canvas.addEventListener("touchmove", (e) => {
         isDragging = true;
 
         // Sensitivity: 1 screen width = 360 degrees rotation (Natural feel)
-        const ROTATE_SPEED = 0.5;
+        const ROTATE_SPEED = 0.85;
         const sensitivity = (Math.PI * 2 * ROTATE_SPEED) / window.innerWidth;
 
         if (cameraMode === "lunar") {
@@ -784,7 +1119,7 @@ function handleInputFocus(clientX, clientY) {
     pointer.x = (clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObjects(Object.values(planetMeshes), true);
+    const hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
 
     if (hits.length > 0) {
         let obj = hits[0].object;
@@ -804,7 +1139,12 @@ function handleSingleTap(clientX, clientY) {
     pointer.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
 
-    const hits = raycaster.intersectObjects(Object.values(planetMeshes), true);
+    let hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
+
+    if (hits.length === 0) {
+        const fallback = findNearestPlanet(clientX, clientY);
+        if (fallback) hits = [{ object: fallback }];
+    }
 
     if (hits.length > 0) {
         let obj = hits[0].object;
@@ -822,6 +1162,36 @@ function handleSingleTap(clientX, clientY) {
     }
 }
 
+function findNearestPlanet(clientX, clientY) {
+
+    const mouse = new THREE.Vector2(
+        (clientX / window.innerWidth) * 2 - 1,
+        -(clientY / window.innerHeight) * 2 + 1
+    );
+
+    let closest = null;
+    let minDist = Infinity;
+
+    for (const name in planetMeshes) {
+
+        const mesh = planetMeshes[name];
+
+        const pos = mesh.position.clone().project(camera);
+
+        const dx = mouse.x - pos.x;
+        const dy = mouse.y - pos.y;
+
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < minDist && dist < 0.15) {
+            closest = mesh;
+            minDist = dist;
+        }
+    }
+
+    return closest;
+}
+
 function handleDoubleTap(clientX, clientY) {
     if (uiPage !== "solar") return;
 
@@ -829,7 +1199,13 @@ function handleDoubleTap(clientX, clientY) {
     pointer.y = -(clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
 
-    const hits = raycaster.intersectObjects(Object.values(planetMeshes), true);
+    let hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
+
+    // ADD THIS FALLBACK BLOCK
+    if (hits.length === 0) {
+        const fallback = findNearestPlanet(clientX, clientY);
+        if (fallback) hits = [{ object: fallback }];
+    }
 
     if (hits.length > 0) {
         let obj = hits[0].object;
@@ -840,7 +1216,6 @@ function handleDoubleTap(clientX, clientY) {
         }
     }
 }
-
 const modeDock = document.querySelector(".mode-switch-container");
 const sheetModes = document.querySelector(".sheet-modes");
 if (modeDock) {
@@ -1271,8 +1646,15 @@ ANIMATION LOOP
 // Variable to track frames for UI throttling
 let frameCount = 0;
 
-function animate() {
+let lastFrameTime = 0;
+const FPS_LIMIT = 60;
+const FRAME_TIME = 1000 / FPS_LIMIT;
+
+function animate(time = 0) {
+
     requestAnimationFrame(animate);
+    if (time - lastFrameTime < FRAME_TIME) return;
+    lastFrameTime = time;
 
     const now = clock.getElapsedTime();
     const deltaSeconds = clock.getDelta();
@@ -1315,9 +1697,16 @@ function animate() {
 
             loadSolarForDate(simDate);
             loadMoonForDate(simDate);
+            loadPlanetVisibilityForDate(simDate);
+            hideScreenSkeleton();
 
             if (cameraMode === "lunar") {
-                loadPlanetVisibilityForDate(simDate);
+
+                showScreenSkeleton();
+
+                loadPlanetVisibilityForDate(simDate)
+                    .finally(() => hideScreenSkeleton());
+
             }
         }
 
@@ -1430,7 +1819,7 @@ function animate() {
     // ---------------- UI & SYNC ----------------
     // CRITICAL FIX: Throttle UI Updates (1x per 0.5s approx)
     frameCount++;
-    if (frameCount % 30 === 0 && !isTimeTraveling) {
+    if (frameCount % 60 === 0 && !isTimeTraveling) {
         updateDateDisplay();
     }
 
@@ -1466,7 +1855,7 @@ function animate() {
     }
 
     // ---------------- CAMERA SMOOTHING ----------------
-    const lerpFactor = 0.1;
+    const lerpFactor = 0.18;
 
     currentTargetPos.lerp(targetPos, lerpFactor);
     currentRadius = THREE.MathUtils.lerp(currentRadius, targetRadius, lerpFactor);
@@ -1483,7 +1872,7 @@ function animate() {
     );
     camera.lookAt(currentTargetPos);
     // ================= SIZE BOOST SYSTEM =================
-    if (uiPage === "solar" && cameraMode !== "lunar") {
+    if (uiPage === "solar" && cameraMode !== "lunar" && frameCount % 30 === 0) {
 
         for (const name in PLANETS) {
 
@@ -1492,23 +1881,25 @@ function animate() {
 
             const baseScale = mesh.userData.baseScale || 4;
 
-            const distanceToCamera = mesh.position.distanceTo(camera.position);
+            const distanceToCamera = camera.position.distanceTo(mesh.position);
 
-            // Tune these two numbers for feel
-            const boostFactor = distanceToCamera / 500; // change this number to scale the planets when zooming out lower is larger radius
+            const boostFactor = distanceToCamera / 500;
+
             const clampedBoost = THREE.MathUtils.clamp(boostFactor, 1, 3);
 
-            const finalScale = baseScale * clampedBoost;
-
-            mesh.scale.setScalar(finalScale);
+            mesh.scale.setScalar(baseScale * clampedBoost);
         }
     }
 
     if (asteroidBelt) {
         asteroidBelt.rotation.y += 0.0002;
+        // Dynamically hide when zoomed out
+        asteroidBelt.visible = currentRadius < 800 && cameraMode !== "lunar";
     }
     if (kuiperBelt) {
-        kuiperBelt.rotation.y += 0.00005; // much slower
+        kuiperBelt.rotation.y += 0.00005;
+        // Dynamically hide when zoomed out
+        kuiperBelt.visible = currentRadius < 1800 && cameraMode !== "lunar";
     }
     renderer.render(scene, camera);
 }
@@ -1546,7 +1937,8 @@ function mapDistanceAU(au) {
 
 function createCircularOrbit(aAU) {
     const points = [];
-    const segments = 256;
+    // const segments = 256;
+    const segments = isMobile ? 64 : 256;
     const radius = mapDistanceAU(aAU);
 
     for (let i = 0; i <= segments; i++) {
@@ -1612,7 +2004,7 @@ function createEllipticalOrbit(planet) {
 // =====================================================
 function createAsteroidBelt() {
 
-    const asteroidCount = 2500;
+    const asteroidCount = isMobile ? 0 : 2200;
 
     const innerAU = 2.2;
     const outerAU = 3.2;
@@ -1677,7 +2069,7 @@ function createAsteroidBelt() {
 // =====================================================
 function createKuiperBelt() {
 
-    const objectCount = 4000;
+    const objectCount = isMobile ? 0 : 2800;
 
     const innerAU = 35;
     const outerAU = 55;
@@ -1791,48 +2183,30 @@ let currentEventsYear = new Date().getFullYear();
 let availableYears = [];
 let cachedEvents = [];
 // ---------------------------------------------------------------------
-
-// View Toggle Buttons (Icons in the panel header)
-const viewEventsBtn = document.getElementById("btn-view-events");
-const viewSettingsBtn = document.getElementById("btn-view-settings");
-
-// View Containers
+// --- NEW APPLE-STYLE TAB LOGIC ---
+const tabAlerts = document.getElementById("tab-alerts");
+const tabEvents = document.getElementById("tab-events");
 const viewNotifications = document.getElementById("view-notifications");
 const viewEventsLog = document.getElementById("view-events-log");
-const viewSettings = document.getElementById("view-settings");
 
-// --- FIXED: Add Safety Checks (if statements) to prevent crashes ---
-
-document.getElementById("back-to-notifications-events")?.addEventListener("click", () => {
-    viewNotifications?.classList.remove("hidden");
-    viewEventsLog?.classList.add("hidden");
-    viewSettings?.classList.add("hidden");
+tabAlerts?.addEventListener("click", () => {
+    tabAlerts.classList.add("active");
+    tabEvents.classList.remove("active");
+    viewNotifications.classList.remove("hidden");
+    viewEventsLog.classList.add("hidden");
 });
 
-document.getElementById("back-to-notifications-settings")?.addEventListener("click", () => {
-    viewNotifications?.classList.remove("hidden");
-    viewEventsLog?.classList.add("hidden");
-    viewSettings?.classList.add("hidden");
+tabEvents?.addEventListener("click", () => {
+    tabEvents.classList.add("active");
+    tabAlerts.classList.remove("active");
+    viewEventsLog.classList.remove("hidden");
+    viewNotifications.classList.add("hidden");
 });
 
 // 1. OPEN PANEL
 if (notifBtn && eventsPanel) {
     notifBtn?.addEventListener("click", () => {
         hideNotificationDot();
-
-        const hasNotifications =
-            document.querySelector("#notifications-container .notification-item");
-
-        if (hasNotifications) {
-            viewNotifications?.classList.remove("hidden");
-            viewEventsLog?.classList.add("hidden");
-        } else {
-            viewEventsLog?.classList.remove("hidden");
-            viewNotifications?.classList.add("hidden");
-        }
-
-        viewSettings?.classList.add("hidden");
-
         eventsPanel.classList.add("show");
         document.body.classList.add("events-open");
     });
@@ -1843,23 +2217,6 @@ if (closeEventsBtn && eventsPanel) {
     closeEventsBtn?.addEventListener("click", () => {
         eventsPanel.classList.remove("show");
         document.body.classList.remove("events-open");
-    });
-}
-
-// 3. SWITCH BETWEEN VIEWS
-if (viewEventsBtn) {
-    viewEventsBtn.addEventListener("click", () => {
-        if (viewEventsLog) viewEventsLog.classList.remove("hidden");
-        if (viewNotifications) viewNotifications.classList.add("hidden");
-        if (viewSettings) viewSettings.classList.add("hidden");
-    });
-}
-
-if (viewSettingsBtn) {
-    viewSettingsBtn.addEventListener("click", () => {
-        if (viewSettings) viewSettings.classList.remove("hidden");
-        if (viewEventsLog) viewEventsLog.classList.add("hidden");
-        if (viewNotifications) viewNotifications.classList.add("hidden");
     });
 }
 
@@ -1887,11 +2244,14 @@ async function loadPlanetVisibilityForDate(dateObj) {
 
     try {
 
-        planetList.innerHTML =
-            '<div style="text-align:center; padding:20px; opacity:0.5; font-size:12px;">Calibrating sensors...</div>';
+        planetList.innerHTML = `
+        <div class="planet-skeleton"></div>
+        <div class="planet-skeleton"></div>
+        <div class="planet-skeleton"></div>
+        `;
 
         const data = await fetchVisibility(iso);
-
+        todayVisibilityData = data;
         renderPlanetVisibility(data);
 
     } catch (e) {
@@ -1939,44 +2299,73 @@ function renderEvents(events) {
         const regions = ev.visibility_regions?.join(" • ") || "Global";
 
         div.innerHTML = `
-            <div class="event-date" style="background: ${accent}; color: #fff;">${formatDate(ev.date)}</div>
-            <div class="event-title">${ev.title}</div>
-            <div class="event-meta">
-                <span class="meta-india ${ev.visible_from_india ? "visible" : "hidden-vis"}">
-                    ${ev.visible_from_india ? "✓ Visible in India" : "× Not visible in India"}
-                </span>
+            <div class="event-card-content">
+                <div class="event-header-row">
+                    <span class="event-date" style="color: ${accent}; background: ${accent.replace('0.7', '0.1').replace('0.8', '0.1')}">${formatDate(ev.date)}</span>
+                    <span class="meta-india ${ev.visible_from_india ? "visible" : "hidden-vis"}">
+                        ${ev.visible_from_india ? "👁 Visible locally" : "Not visible locally"}
+                    </span>
+                </div>
+                <div class="event-title">${ev.title}</div>
                 <div class="meta-global">${regions}</div>
             </div>
-            <button class="notify-btn">🔔 Notify Me</button>
+            <button class="notify-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                <span class="notify-text">Notify Me</span>
+            </button>
         `;
+
+        // Restore saved reminder state
+        if (localStorage.getItem(`eventReminder_${ev.id}`) === "true") {
+            const btn = div.querySelector(".notify-btn");
+            btn.classList.add("active");
+            btn.querySelector(".notify-text").textContent = "Reminder Set";
+        }
 
         eventsContainer.appendChild(div);
 
         div.querySelector(".notify-btn").onclick = async (e) => {
 
-            await enablePushIfNeeded();
-
-            if (!hasNotificationPermission()) {
-                alert("Enable notifications first in Settings.");
+            const LocalNotifications = getLocalNotifications();
+            if (!LocalNotifications) {
+                console.log("Notifications unavailable");
                 return;
             }
+            const btn = e.currentTarget;
 
-            e.target.classList.toggle("active");
+            btn.classList.toggle("active");
 
-            if (e.target.classList.contains("active")) {
-                e.target.textContent = "✓ Reminder Set";
+            if (btn.classList.contains("active")) {
 
-                // Optional: store event reminder
-                let reminders = JSON.parse(localStorage.getItem("eventReminders") || "[]");
-                reminders.push(ev.id);
-                localStorage.setItem("eventReminders", JSON.stringify(reminders));
+                btn.querySelector(".notify-text").textContent = "Reminder Set";
+                localStorage.setItem(`eventReminder_${ev.id}`, "true");
+
+                const eventTime = new Date(ev.date);
+                eventTime.setHours(18, 0, 0, 0);
+
+                await LocalNotifications.schedule({
+                    notifications: [{
+                        id: 1000 + ev.id,
+                        title: "🌠 Astronomy Event Tonight",
+                        body: `${ev.title}\n\nTap to explore in Lunar Observatory 🔭`,
+                        smallIcon: "notification",
+                        schedule: { at: eventTime },
+                        extra: {
+                            type: "astronomy_event",
+                            event_id: ev.id
+                        }
+                    }]
+                });
 
             } else {
-                e.target.textContent = "🔔 Notify Me";
 
-                let reminders = JSON.parse(localStorage.getItem("eventReminders") || "[]");
-                reminders = reminders.filter(id => id !== ev.id);
-                localStorage.setItem("eventReminders", JSON.stringify(reminders));
+                btn.querySelector(".notify-text").textContent = "Notify Me";
+                localStorage.removeItem(`eventReminder_${ev.id}`);
+
+                await LocalNotifications.cancel({
+                    notifications: [{ id: 1000 + ev.id }]
+                });
+
             }
         };
     });
@@ -2115,40 +2504,6 @@ function capitalize(str) {
 }
 
 
-// 4. NOTIFICATION LOGIC (Settings Buttons)
-
-
-document.getElementById("enable-daily-brief")?.addEventListener("click", () => {
-    localStorage.setItem("dailyBrief", "true");
-    alert("🌅 Daily Morning Brief Enabled");
-});
-
-document.getElementById("enable-planet-brief")?.addEventListener("click", () => {
-    localStorage.setItem("planetBrief", "true");
-    alert("🪐 Daily Planet Visibility Enabled");
-});
-
-document.getElementById("disable-notifications")?.addEventListener("click", () => {
-    // 1. Remove Data
-    localStorage.removeItem("dailyBrief");
-    localStorage.removeItem("planetBrief");
-    localStorage.removeItem("eventReminders");
-    localStorage.removeItem("fcm_token");
-    localStorage.removeItem("pushRegistered");
-
-    // 2. Visual Reset (Now this works because variables are defined above)
-    if (dailyToggle) dailyToggle.checked = false;
-    if (planetToggle) planetToggle.checked = false;
-
-    // 3. Reset Bell Buttons
-    document.querySelectorAll(".notify-btn").forEach(btn => {
-        btn.classList.remove("active");
-        btn.textContent = "🔔 Notify Me";
-    });
-
-    alert("Notifications Disabled");
-});
-
 // Init Data
 (async () => {
     try {
@@ -2156,6 +2511,7 @@ document.getElementById("disable-notifications")?.addEventListener("click", () =
 
         const moonData = await fetchMoonData(iso);
         updateMoonCards(moonData);
+        await loadPlanetVisibilityForDate(realToday);
 
         await loadSolarForDate(realToday);
     } catch (e) {
@@ -2166,284 +2522,112 @@ document.getElementById("disable-notifications")?.addEventListener("click", () =
             loaderUI.style.opacity = "0";
             setTimeout(() => loaderUI.remove(), 800);
         }
-        await checkForNewYear();
     }
+
+    checkForNewYear();
+    checkForAppUpdate();
+
 })();
-
-
-
-// ======== Firebase Notification ==============
-// ---------------- Firebase Push Setup ---------------
-const firebaseConfig = {
-    apiKey: "AIzaSyCcofnDYMVom82NSHwNsT_0oZzhsMiUEEA",
-    authDomain: "lunar-observatory.firebaseapp.com",
-    projectId: "lunar-observatory",
-    storageBucket: "lunar-observatory.firebasestorage.app",
-    messagingSenderId: "379098412161",
-    appId: "1:379098412161:web:0e386d4c2744c058748980"
-};
-
-let firebaseApp = null;
-let messaging = null;
-
-if (!isNativeApp) {
-    firebaseApp = initializeApp(firebaseConfig);
-    messaging = getMessaging(firebaseApp);
-}
-
-// ... existing imports ...
-
-async function setupPush() {
-
-    if (isNativeApp) {
-        console.log("Native app detected — skipping web push setup.");
-        return;
-    }
-
-    try {
-
-        // 1️⃣ Request permission properly
-        if (typeof Notification === "undefined") {
-            console.log("Notification API not supported.");
-            return;
-        }
-
-        const permission = await Notification.requestPermission();
-
-        if (permission !== "granted") {
-            console.log("Notification permission denied.");
-            return;
-        }
-
-        // 2️⃣ Determine correct SW path
-        const swPath =
-            location.hostname === "localhost" ||
-                location.hostname === "127.0.0.1"
-                ? "/firebase-messaging-sw.js"
-                : "/lunar-observatory/firebase-messaging-sw.js";
-
-        console.log(`Registering SW at: ${swPath}`);
-
-        // 3️⃣ Register Service Worker
-        let registration = await navigator.serviceWorker.getRegistration();
-
-        if (!registration) {
-            registration = await navigator.serviceWorker.register(swPath, {
-                scope: "./"
-            });
-        }
-
-        await navigator.serviceWorker.ready;
-
-        // 4️⃣ Get token
-        const token = await getToken(messaging, {
-            vapidKey: "BFZ0767uqrN5u5Ey0HmcKJYrUgbDchsWXChR1PSezmLQToHkgAD4eImqTtFdi2oA1MKBJB9lJ31Pr2SPmbBu8cU",
-            serviceWorkerRegistration: registration
-        });
-
-        if (!token) {
-            console.log("No registration token available.");
-            return;
-        }
-
-        // 5️⃣ Send to backend only if changed
-        const savedToken = localStorage.getItem("fcm_token");
-
-        if (token !== savedToken) {
-
-            console.log("New token detected, updating backend...");
-
-            await fetch(`${API_BASE}/api/push/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    token: token,
-                    daily_brief: localStorage.getItem("dailyBrief") === "true",
-                    planet_brief: localStorage.getItem("planetBrief") === "true"
-                })
-            });
-
-            localStorage.setItem("fcm_token", token);
-            localStorage.setItem("pushRegistered", "true");
-
-            console.log("Token registered successfully.");
-        } else {
-            console.log("Token is up to date.");
-        }
-
-    } catch (err) {
-        console.error("Push setup error:", err);
-    }
-}
-
-let nativePushReady = false;
-
-async function initNativePush() {
-
-    if (!isNativeApp) return;
-
-    const PushNotifications = window.Capacitor.Plugins.PushNotifications;
-
-    if (!PushNotifications) {
-        console.error("PushNotifications plugin not available");
-        return;
-    }
-
-    const permission = await PushNotifications.requestPermissions();
-
-    if (permission.receive !== 'granted') {
-        console.log("Notification permission not granted");
-        return;
-    }
-
-    await PushNotifications.register();
-
-    PushNotifications.addListener('registration', async (token) => {
-
-        console.log("Native FCM Token:", token.value);
-
-        await fetch(`${API_BASE}/api/push/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                token: token.value,
-                daily_brief: localStorage.getItem("dailyBrief") === "true",
-                planet_brief: localStorage.getItem("planetBrief") === "true"
-            })
-        });
-
-        localStorage.setItem("pushRegistered", "true");
-        localStorage.setItem("fcm_token", token.value);
-    });
-
-    PushNotifications.addListener('registrationError', (err) => {
-        console.error("Push registration error:", err);
-    });
-}
 
 // ================= CLEAN NOTIFICATION TOGGLE SYSTEM =================
 
-const dailyToggle = document.getElementById("toggle-daily-brief");
-const planetToggle = document.getElementById("toggle-planet-brief");
+const dailyToggle = document.getElementById("toggle-notifications");
 
 // Sync toggle UI from localStorage on load
-function syncNotificationUI() {
-    if (dailyToggle) {
-        dailyToggle.checked = localStorage.getItem("dailyBrief") === "true";
-    }
-    if (planetToggle) {
-        planetToggle.checked = localStorage.getItem("planetBrief") === "true";
-    }
-    if (!hasNotificationPermission()) {
+async function syncNotificationUI() {
+
+    const LocalNotifications = getLocalNotifications();
+
+    if (!LocalNotifications) return;
+
+    const status = await LocalNotifications.checkPermissions();
+
+    const stored = localStorage.getItem("dailyBrief");
+
+    if (status.display === "granted") {
+
+        // Auto-enable if permission exists but user never toggled
+        if (stored === null) {
+            localStorage.setItem("dailyBrief", "true");
+        }
+
+        if (dailyToggle) {
+            dailyToggle.checked = localStorage.getItem("dailyBrief") === "true";
+        }
+
+    } else if (status.display === "denied") {
+
         localStorage.removeItem("dailyBrief");
-        localStorage.removeItem("planetBrief");
+
+        if (dailyToggle) {
+            dailyToggle.checked = false;
+        }
     }
 }
+
+async function openNotificationSettings() {
+    // Native settings require a specialized Capacitor plugin (like @capacitor-community/native-settings).
+    // We will fail gracefully for now to prevent crashes.
+    alert("Please go to your device's settings menu, find Lunar Observatory, and reset or allow notifications manually.");
+}
+document.getElementById("disable-notifications")?.addEventListener("click", async () => {
+
+    await cancelDailyNotifications();
+
+    localStorage.clear();
+
+    await openNotificationSettings();
+
+});
 
 // Check permission status
 async function hasNotificationPermission() {
+    // FIX: Get the plugin instance first!
+    const LocalNotifications = getLocalNotifications();
+    if (!LocalNotifications) return false;
 
-    if (isNativeApp) {
-        const PushNotifications = window.Capacitor?.Plugins?.PushNotifications;
-        if (!PushNotifications) return false;
+    const result = await LocalNotifications.checkPermissions();
 
-        const result = await PushNotifications.checkPermissions();
-        return result.receive === "granted";
-    }
-
-    if (typeof Notification === "undefined") return false;
-
-    return Notification.permission === "granted";
-}
-// Enable Push (only when needed)
-let pushInitializing = false;
-async function enablePushIfNeeded() {
-
-    if (isNativeApp) {
-
-        const allowed = await hasNotificationPermission();
-        if (!allowed) {
-            await initNativePush();
-        }
-
-        return;
-    }
-
-    if (!(await hasNotificationPermission())) {
-        await setupPush();
-    }
+    return result.display === "granted";
 }
 
 dailyToggle?.addEventListener("change", async (e) => {
+    const LocalNotifications = getLocalNotifications();
+
+    if (!LocalNotifications) {
+        console.log("Notifications plugin unavailable");
+        e.target.checked = false;
+        return;
+    }
 
     if (e.target.checked) {
+        // 1. Check current exact status
+        let status = await LocalNotifications.checkPermissions();
 
-        // ✅ Save state FIRST (before permission flow)
+        // 2. Request if not already granted
+        if (status.display !== "granted") {
+            status = await LocalNotifications.requestPermissions();
+        }
+
+        // 3. Handle persistent denial
+        if (status.display !== "granted") {
+            alert("Permission required. Please enable notifications for this app in your device settings.");
+            e.target.checked = false;
+            openNotificationSettings(); // Push them to native settings
+            return;
+        }
+
+        await scheduleDailyNotifications();
         localStorage.setItem("dailyBrief", "true");
 
-        await enablePushIfNeeded();
-
-        if (!hasNotificationPermission()) {
-            localStorage.removeItem("dailyBrief");
-            e.target.checked = false;
-            return;
-        }
-        await fetch(`${API_BASE}/api/push/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                token: localStorage.getItem("fcm_token"),
-                daily_brief: e.target.checked,
-                planet_brief: localStorage.getItem("planetBrief") === "true"
-            })
-        });
-        console.log("Daily Brief Enabled");
-
     } else {
+        await cancelDailyNotifications();
         localStorage.removeItem("dailyBrief");
-        console.log("Daily Brief Disabled");
-    }
-});
-
-// PLANET BRIEF TOGGLE
-planetToggle?.addEventListener("change", async (e) => {
-
-    if (e.target.checked) {
-
-        // ✅ Save first
-        localStorage.setItem("planetBrief", "true");
-
-        await enablePushIfNeeded();
-
-        if (!hasNotificationPermission()) {
-            localStorage.removeItem("planetBrief");
-            e.target.checked = false;
-            return;
-        }
-        await fetch(`${API_BASE}/api/push/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                token: localStorage.getItem("fcm_token"),
-                daily_brief: localStorage.getItem("dailyBrief") === "true",
-                planet_brief: e.target.checked
-            })
-        });
-
-        console.log("Planet Brief Enabled");
-
-    } else {
-        localStorage.removeItem("planetBrief");
-        console.log("Planet Brief Disabled");
     }
 });
 
 // Run once at startup
 syncNotificationUI();
-
-if (isNativeApp) {
-    initNativePush();
-}
 
 const notifDot = document.getElementById("notif-dot");
 const notificationsContainer = document.getElementById("notifications-container");
@@ -2468,22 +2652,23 @@ function addNotificationToPanel(notification) {
     }
 
     div.innerHTML = `
+        <div class="notif-icon-wrapper">
+            <span class="notif-icon">🔔</span>
+        </div>
+        <div class="notif-content-wrapper">
             <div class="notification-header">
                 <div class="notification-title">${notification.title}</div>
-                <div class="notification-actions">
-                    <button class="notif-read-btn" title="Mark as read"></button>
-                    <button class="notif-delete-btn" title="Delete">✕</button>
-                </div>
+                <div class="notification-time">${new Date(notification.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
             </div>
-
-            <div class="notification-body">
-                ${notification.body}
-            </div>
-
-            <div class="notification-time">
-                ${new Date(notification.time).toLocaleString()}
-            </div>
-        `;
+            <div class="notification-body">${notification.body}</div>
+        </div>
+        <div class="notification-actions">
+            <button class="notif-read-btn" title="Mark as read">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </button>
+            <button class="notif-delete-btn" title="Delete">✕</button>
+        </div>
+    `;
 
     div.addEventListener("click", () => {
         div.classList.remove("unread");
@@ -2558,29 +2743,34 @@ function loadStoredNotifications() {
 
 loadStoredNotifications();
 
-if (!isNativeApp && messaging) {
-    onMessage(messaging, (payload) => {
-        console.log("Foreground message received:", payload);
+// --- NATIVE OS NOTIFICATION INTERCEPTOR ---
+async function listenToOSNotifications() {
+    const LocalNotifications = getLocalNotifications();
+    if (!LocalNotifications) return;
 
-        const title = payload.notification?.title || "Notification";
-        const body = payload.notification?.body || "";
-
-        const newNotification = {
-            id: Date.now(),
-            title,
-            body,
+    await LocalNotifications.addListener('localNotificationReceived', (notification) => {
+        // Construct the alert data
+        const newAlert = {
+            id: notification.id || Date.now(),
+            title: notification.title || "Astronomy Alert",
+            body: notification.body || "A celestial event is happening.",
             time: new Date().toISOString(),
             read: false
         };
 
+        // Get storage, prevent duplicates, and save
         let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-        stored.unshift(newNotification);
-        localStorage.setItem("appNotifications", JSON.stringify(stored));
+        if (!stored.find(n => n.id === newAlert.id)) {
+            stored.unshift(newAlert);
+            localStorage.setItem("appNotifications", JSON.stringify(stored));
 
-        addNotificationToPanel(newNotification);
-        showNotificationDot();
+            // Push immediately to UI
+            addNotificationToPanel(newAlert);
+            showNotificationDot();
+        }
     });
 }
+listenToOSNotifications();
 
 // ================= YEAR UPDATE CHECK =================
 
@@ -2627,4 +2817,122 @@ async function checkForNewYear() {
         console.log("No internet or no new year available.");
 
     }
+}
+
+// ================= VERSION CHECK =================
+
+async function checkForAppUpdate() {
+
+    try {
+
+        const res = await fetch(VERSION_URL);
+        const data = await res.json();
+
+        if (data.latest_version !== CURRENT_APP_VERSION) {
+
+            showUpdateBanner(data.message);
+
+        }
+
+    } catch (e) {
+
+        console.log("Version check failed:", e);
+
+    }
+}
+
+function showUpdateBanner(message) {
+
+    // prevent duplicates
+    if (document.getElementById("update-card")) return;
+
+    const card = document.createElement("div");
+    card.id = "update-card";
+
+    card.style.position = "fixed";
+    card.style.bottom = "-160px";
+    card.style.left = "50%";
+    card.style.transform = "translateX(-50%)";
+    card.style.width = "90%";
+    card.style.maxWidth = "420px";
+    card.style.background = "rgba(12,18,38,0.96)";
+    card.style.color = "#fff";
+    card.style.borderRadius = "18px";
+    card.style.padding = "16px";
+    card.style.boxShadow = "0 12px 40px rgba(0,0,0,0.45)";
+    card.style.zIndex = "9999";
+    card.style.transition = "bottom 0.45s cubic-bezier(.2,.9,.3,1)";
+    card.style.fontFamily = "system-ui";
+
+    card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <div style="
+                width:36px;
+                height:36px;
+                border-radius:10px;
+                background:#4da3ff;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:18px">
+                🚀
+            </div>
+
+            <div style="font-weight:600;font-size:15px">
+                Update Available
+            </div>
+        </div>
+
+        <div style="font-size:13px;opacity:0.8;margin-bottom:14px">
+            ${message}
+        </div>
+
+        <div style="display:flex;gap:10px">
+
+            <button id="update-later"
+            style="
+                flex:1;
+                padding:8px;
+                border-radius:10px;
+                border:none;
+                background:#222;
+                color:white;
+                font-size:13px;">
+                Later
+            </button>
+
+            <button id="update-now"
+            style="
+                flex:1;
+                padding:8px;
+                border-radius:10px;
+                border:none;
+                background:#4da3ff;
+                color:white;
+                font-weight:600;
+                font-size:13px;">
+                Update
+            </button>
+
+        </div>
+    `;
+
+    document.body.appendChild(card);
+
+    // slide up animation
+    requestAnimationFrame(() => {
+        card.style.bottom = "30px";
+    });
+
+    document.getElementById("update-later").onclick = () => {
+        card.style.bottom = "-200px";
+        setTimeout(() => card.remove(), 400);
+    };
+
+    document.getElementById("update-now").onclick = () => {
+        window.open(
+            "https://github.com/KunjP44/lunar-observatory/releases",
+            "_blank"
+        );
+    };
 }
