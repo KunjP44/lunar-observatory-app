@@ -736,15 +736,14 @@ canvas.addEventListener("mouseleave", () => {
 });
 
 // 3. Mouse Move: HANDLE ROTATION
+// 3. Mouse Move: HANDLE ROTATION
 canvas.addEventListener("mousemove", (e) => {
-    if (!isMouseDown) return;
-    // Cursor Logic
     pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(pointer, camera);
 
-    if (!isMouseDown && frameCount % 15 === 0) {
-        // Just hovering? Show pointer if over object
+    // Hover cursor detection (Removed the frame throttle so it updates instantly)
+    if (!isMouseDown) {
         const hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
         let validHit = false;
         for (const h of hits) {
@@ -759,10 +758,11 @@ canvas.addEventListener("mousemove", (e) => {
     }
 
     // If mouse is down and moving, we are dragging
-
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
-    if (!isDragging && Math.abs(dx) < 5 && Math.abs(dy) < 5) {
+
+    // Small deadzone to differentiate a click from a drag
+    if (!isDragging && Math.abs(dx) < 4 && Math.abs(dy) < 4) {
         return;
     }
     isDragging = true;
@@ -770,13 +770,17 @@ canvas.addEventListener("mousemove", (e) => {
     if (cameraMode === "lunar" && draggingMoon) {
         planetMeshes.moon.rotation.y += dx * 0.007;
     } else if (cameraMode !== "lunar") {
-        // Update TARGETS instead of actual values to allow smoothing
-        targetTheta += dx * 0.0012;
-        targetPhi += dy * 0.0012;
+        const ROTATE_SPEED = 0.0035;
+
+        // FIX: Changed += to -= so the rotation follows your mouse naturally (grab & pull)
+        targetTheta -= dx * ROTATE_SPEED;
+        targetPhi -= dy * ROTATE_SPEED;
 
         // Clamp the target immediately so we don't flip over
         targetPhi = THREE.MathUtils.clamp(targetPhi, 0.1, Math.PI - 0.1);
     }
+
+    // Always update last position
     lastX = e.clientX;
     lastY = e.clientY;
 });
@@ -814,22 +818,34 @@ canvas.addEventListener("dblclick", (e) => {
     }
 });
 
+// 5. Mouse Wheel / Two-Finger Trackpad: ZOOM LOGIC
+// 5. Mouse Wheel / Two-Finger Trackpad: ZOOM LOGIC
+canvas.addEventListener("wheel", (e) => {
 
-window.addEventListener("wheel", (e) => {
+    // 1. Immediately prevent browser scrolling/scaling
+    if (e.cancelable) e.preventDefault();
 
-    // STOP camera zoom if events panel is open
-    if (eventsPanel && eventsPanel.classList.contains("show")) return;
+    // 2. Block zooming if UI is open or in Lunar mode
+    if (document.body.classList.contains("events-open") || uiPage === "lunar") return;
 
-    if (uiPage === "lunar") return;
+    // 3. Zoom Logic
+    // Normal mouse wheels send large deltaY (e.g. 100). Trackpads send many small ones (e.g. 2-5).
+    let zoomAmount = e.deltaY * 0.002;
 
-    targetRadius *= 1 + e.deltaY * 0.001; // higher value higher zoom speed
+    // Aggressive scaling for native trackpad Pinch-to-Zoom (ctrlKey + deltaY)
+    if (e.ctrlKey) {
+        zoomAmount = e.deltaY * 0.01;
+    }
 
+    targetRadius *= (1 + zoomAmount);
+
+    // 4. Enforce Zoom Limits based on Camera Mode
     const min = cameraMode === "focus" ? focusMinRadius : DEFAULT_MIN_RADIUS;
     const max = cameraMode === "focus" ? focusMaxRadius : DEFAULT_MAX_RADIUS;
 
     targetRadius = THREE.MathUtils.clamp(targetRadius, min, max);
-});
 
+}, { passive: false });
 //  ====================== touch controls =====================
 /* =====================================================
    MOBILE TOUCH HANDLING (Google Earth Style)
