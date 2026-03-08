@@ -12,51 +12,10 @@ import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import { loadInfoCard } from "./infoCard.js";
 import { fetchMoonData, fetchPlanetPositions, fetchVisibility, fetchEventsForYear } from "./api.js";
 import { initLearnMode } from "./learn.js";
-import { FACTS } from "./facts.js";
 function getLocalNotifications() {
     return window.Capacitor?.Plugins?.LocalNotifications || null;
 }
 
-function getDailyFact() {
-
-    const today = new Date();
-    const start = new Date(today.getFullYear(), 0, 0);
-
-    const diff = today - start;
-    const day = Math.floor(diff / 86400000);
-
-    return FACTS[day % FACTS.length];
-}
-
-function getTonightSkyMessage() {
-
-    const phase = document.getElementById("ui-phase")?.textContent || "Moon";
-    const illum = document.getElementById("ui-illum")?.textContent || "";
-
-    let planetLine = "";
-
-    if (todayVisibilityData && Object.keys(todayVisibilityData).length > 0) {
-
-        const excellentPlanets = [];
-
-        for (const [name, info] of Object.entries(todayVisibilityData)) {
-            if (info.visibility_rating === "Excellent") {
-                excellentPlanets.push(
-                    name.charAt(0).toUpperCase() + name.slice(1)
-                );
-            }
-        }
-
-        if (excellentPlanets.length > 0) {
-            planetLine = `\n\n🪐 Excellent Viewing: ${excellentPlanets.join(" • ")}`;
-        }
-    }
-
-    return `${phase}
-Illumination: ${illum}${planetLine}
-
-Look up after sunset 🔭`;
-}
 
 window.addEventListener("error", e => {
     console.error("GLOBAL ERROR:", e.message);
@@ -248,119 +207,6 @@ async function loadMoonForDate(dateObj) {
     } catch (e) {
         console.error("API Error:", e);
     }
-}
-
-async function requestNotificationPermission() {
-
-    const LocalNotifications = getLocalNotifications();
-
-    if (!LocalNotifications) {
-        console.log("LocalNotifications not available yet");
-        return false;
-    }
-
-    const perm = await LocalNotifications.requestPermissions();
-
-    return perm.display === "granted";
-}
-async function scheduleDailyNotifications() {
-    const LocalNotifications = getLocalNotifications();
-    if (!LocalNotifications) return;
-
-    await cancelDailyNotifications(); // Clean the slate first
-
-    const notifications = [];
-
-    // 1. Tonight's Sky (Repeats daily at 19:30)
-    const skyMsg = getTonightSkyMessage();
-    notifications.push({
-        id: 2,
-        title: "🔭 Tonight's Sky",
-        body: "Planets are visible tonight. Expand to see details!", // Short summary
-        largeBody: skyMsg, // FULL text shown when expanded
-        smallIcon: "notification",
-        schedule: {
-            on: { hour: 19, minute: 30 },
-            repeats: true
-        }
-    });
-
-    // 2. 30-Day Fact Scheduler (Every morning at 8:00 AM)
-    const now = new Date();
-    let daysAdded = now.getHours() >= 8 ? 1 : 0; // If past 8AM, start from tomorrow
-
-    for (let i = 0; i < 30; i++) {
-        const factDate = new Date(now);
-        factDate.setDate(now.getDate() + daysAdded + i);
-        factDate.setHours(8, 0, 0, 0);
-
-        // Get a specific fact based on the day of the year
-        const start = new Date(factDate.getFullYear(), 0, 0);
-        const diff = factDate - start;
-        const dayOfYear = Math.floor(diff / 86400000);
-        const specificFact = FACTS[dayOfYear % FACTS.length];
-
-        notifications.push({
-            id: 100 + i,
-            title: "✨ Fact of the Day",
-            body: specificFact,
-            largeBody: specificFact, // Prevents truncation for long facts
-            smallIcon: "notification",
-            schedule: { at: factDate }
-        });
-    }
-
-    await LocalNotifications.schedule({ notifications });
-}
-
-async function testNotifications() {
-    const LocalNotifications = getLocalNotifications();
-    if (!LocalNotifications) return;
-
-    const skyMsg = getTonightSkyMessage();
-    const factMsg = getDailyFact();
-
-    await LocalNotifications.schedule({
-        notifications: [
-            {
-                id: 9001,
-                title: "🌌 Astronomy Fact",
-                body: factMsg,
-                largeBody: factMsg, // Added largeBody
-                smallIcon: "notification",
-                schedule: { at: new Date(Date.now() + 5000) }
-            },
-            {
-                id: 9002,
-                title: "🔭 Tonight's Sky",
-                body: "Planets are visible tonight. Expand to see details!",
-                largeBody: skyMsg, // Added largeBody
-                smallIcon: "notification",
-                schedule: { at: new Date(Date.now() + 8000) }
-            },
-            {
-                id: 9003,
-                title: "🌠 Astronomy Event",
-                body: "Perseid Meteor Shower Peak. Expand for more.",
-                largeBody: "The Perseid Meteor Shower is peaking tonight. Look up after midnight for the best views!", // Added largeBody
-                smallIcon: "notification",
-                schedule: { at: new Date(Date.now() + 11000) }
-            }
-        ]
-    });
-}
-
-window.testNotifications = testNotifications;
-
-async function cancelDailyNotifications() {
-    const LocalNotifications = getLocalNotifications();
-    if (!LocalNotifications) return;
-
-    // Create an array of all possible IDs to cancel (1, 2, 999, and the 30-day facts 100-130)
-    const toCancel = [{ id: 1 }, { id: 2 }, { id: 999 }];
-    for (let i = 0; i < 30; i++) toCancel.push({ id: 100 + i });
-
-    await LocalNotifications.cancel({ notifications: toCancel });
 }
 
 // Event Listeners for Date Picker
@@ -813,7 +659,6 @@ async function resetSimulationToNow() {
     // 5. Force backend updates for everything
     await loadMoonForDate(simDate);
     await loadSolarForDate(simDate);
-    await loadPlanetVisibilityForDate(simDate);
 
     // 6. Immediately realign phase lighting
     realignMoonPhaseImmediately();
@@ -2167,73 +2012,6 @@ async function loadSolarForDate(dateObj) {
     }
 }
 
-
-/* =====================================================
-   ASTRONOMY INTELLIGENCE LOG
-===================================================== */
-
-const notifBtn = document.getElementById("btn-notifications");
-const eventsPanel = document.getElementById("events-panel");
-const closeEventsBtn = document.getElementById("close-events");
-
-// --- FIXED: Define missing variables here to prevent ReferenceError ---
-const eventsContainer = document.getElementById("events-container");
-const eventsYearLabel = document.getElementById("events-year-label");
-let currentEventsYear = new Date().getFullYear();
-let availableYears = [];
-let cachedEvents = [];
-// ---------------------------------------------------------------------
-// --- NEW APPLE-STYLE TAB LOGIC ---
-const tabAlerts = document.getElementById("tab-alerts");
-const tabEvents = document.getElementById("tab-events");
-const viewNotifications = document.getElementById("view-notifications");
-const viewEventsLog = document.getElementById("view-events-log");
-
-tabAlerts?.addEventListener("click", () => {
-    tabAlerts.classList.add("active");
-    tabEvents.classList.remove("active");
-    viewNotifications.classList.remove("hidden");
-    viewEventsLog.classList.add("hidden");
-});
-
-tabEvents?.addEventListener("click", () => {
-    tabEvents.classList.add("active");
-    tabAlerts.classList.remove("active");
-    viewEventsLog.classList.remove("hidden");
-    viewNotifications.classList.add("hidden");
-});
-
-// 1. OPEN PANEL
-if (notifBtn && eventsPanel) {
-    notifBtn?.addEventListener("click", () => {
-        hideNotificationDot();
-        eventsPanel.classList.add("show");
-        document.body.classList.add("events-open");
-    });
-}
-
-// 2. CLOSE PANEL
-if (closeEventsBtn && eventsPanel) {
-    closeEventsBtn?.addEventListener("click", () => {
-        eventsPanel.classList.remove("show");
-        document.body.classList.remove("events-open");
-    });
-}
-
-
-document.getElementById("mark-all-read")?.addEventListener("click", () => {
-
-    let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-    stored = stored.map(n => ({ ...n, read: true }));
-    localStorage.setItem("appNotifications", JSON.stringify(stored));
-
-    hideNotificationDot();
-
-    document.querySelectorAll(".notification-item").forEach(item => {
-        item.classList.remove("unread");
-    });
-});
-
 /* -------------------------
    Load Year Events
 -------------------------- */
@@ -2343,20 +2121,6 @@ function renderEvents(events) {
                 const eventTime = new Date(ev.date);
                 eventTime.setHours(18, 0, 0, 0);
 
-                await LocalNotifications.schedule({
-                    notifications: [{
-                        id: 1000 + ev.id,
-                        title: "🌠 Astronomy Event Tonight",
-                        body: `${ev.title}\n\nTap to explore in Lunar Observatory 🔭`,
-                        smallIcon: "notification",
-                        schedule: { at: eventTime },
-                        extra: {
-                            type: "astronomy_event",
-                            event_id: ev.id
-                        }
-                    }]
-                });
-
             } else {
 
                 btn.querySelector(".notify-text").textContent = "Notify Me";
@@ -2434,7 +2198,6 @@ function formatDate(dateStr) {
 /* -------------------------
    Initialize
 -------------------------- */
-loadEventsForYear(currentEventsYear);
 
 // ================= PLANET VISIBILITY ================
 const moonContent = document.getElementById("moon-content");
@@ -2511,7 +2274,6 @@ function capitalize(str) {
 
         const moonData = await fetchMoonData(iso);
         updateMoonCards(moonData);
-        await loadPlanetVisibilityForDate(realToday);
 
         await loadSolarForDate(realToday);
     } catch (e) {
@@ -2523,301 +2285,9 @@ function capitalize(str) {
             setTimeout(() => loaderUI.remove(), 800);
         }
     }
-
-    checkForNewYear();
     checkForAppUpdate();
 
 })();
-
-// ================= CLEAN NOTIFICATION TOGGLE SYSTEM =================
-
-const dailyToggle = document.getElementById("toggle-notifications");
-
-// Sync toggle UI from localStorage on load
-async function syncNotificationUI() {
-
-    const LocalNotifications = getLocalNotifications();
-
-    if (!LocalNotifications) return;
-
-    const status = await LocalNotifications.checkPermissions();
-
-    const stored = localStorage.getItem("dailyBrief");
-
-    if (status.display === "granted") {
-
-        // Auto-enable if permission exists but user never toggled
-        if (stored === null) {
-            localStorage.setItem("dailyBrief", "true");
-        }
-
-        if (dailyToggle) {
-            dailyToggle.checked = localStorage.getItem("dailyBrief") === "true";
-        }
-
-    } else if (status.display === "denied") {
-
-        localStorage.removeItem("dailyBrief");
-
-        if (dailyToggle) {
-            dailyToggle.checked = false;
-        }
-    }
-}
-
-async function openNotificationSettings() {
-    // Native settings require a specialized Capacitor plugin (like @capacitor-community/native-settings).
-    // We will fail gracefully for now to prevent crashes.
-    alert("Please go to your device's settings menu, find Lunar Observatory, and reset or allow notifications manually.");
-}
-document.getElementById("disable-notifications")?.addEventListener("click", async () => {
-
-    await cancelDailyNotifications();
-
-    localStorage.clear();
-
-    await openNotificationSettings();
-
-});
-
-// Check permission status
-async function hasNotificationPermission() {
-    // FIX: Get the plugin instance first!
-    const LocalNotifications = getLocalNotifications();
-    if (!LocalNotifications) return false;
-
-    const result = await LocalNotifications.checkPermissions();
-
-    return result.display === "granted";
-}
-
-dailyToggle?.addEventListener("change", async (e) => {
-    const LocalNotifications = getLocalNotifications();
-
-    if (!LocalNotifications) {
-        console.log("Notifications plugin unavailable");
-        e.target.checked = false;
-        return;
-    }
-
-    if (e.target.checked) {
-        // 1. Check current exact status
-        let status = await LocalNotifications.checkPermissions();
-
-        // 2. Request if not already granted
-        if (status.display !== "granted") {
-            status = await LocalNotifications.requestPermissions();
-        }
-
-        // 3. Handle persistent denial
-        if (status.display !== "granted") {
-            alert("Permission required. Please enable notifications for this app in your device settings.");
-            e.target.checked = false;
-            openNotificationSettings(); // Push them to native settings
-            return;
-        }
-
-        await scheduleDailyNotifications();
-        localStorage.setItem("dailyBrief", "true");
-
-    } else {
-        await cancelDailyNotifications();
-        localStorage.removeItem("dailyBrief");
-    }
-});
-
-// Run once at startup
-syncNotificationUI();
-
-const notifDot = document.getElementById("notif-dot");
-const notificationsContainer = document.getElementById("notifications-container");
-
-function showNotificationDot() {
-    notifDot?.classList.remove("hidden");
-}
-
-function hideNotificationDot() {
-    notifDot?.classList.add("hidden");
-}
-
-function addNotificationToPanel(notification) {
-
-    const empty = notificationsContainer.querySelector(".empty-state");
-    if (empty) empty.remove();
-    const div = document.createElement("div");
-    div.className = "notification-item";
-
-    if (!notification.read) {
-        div.classList.add("unread");
-    }
-
-    div.innerHTML = `
-        <div class="notif-icon-wrapper">
-            <span class="notif-icon">🔔</span>
-        </div>
-        <div class="notif-content-wrapper">
-            <div class="notification-header">
-                <div class="notification-title">${notification.title}</div>
-                <div class="notification-time">${new Date(notification.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-            </div>
-            <div class="notification-body">${notification.body}</div>
-        </div>
-        <div class="notification-actions">
-            <button class="notif-read-btn" title="Mark as read">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </button>
-            <button class="notif-delete-btn" title="Delete">✕</button>
-        </div>
-    `;
-
-    div.addEventListener("click", () => {
-        div.classList.remove("unread");
-
-        let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-        stored = stored.map(n =>
-            n.id === notification.id ? { ...n, read: true } : n
-        );
-        localStorage.setItem("appNotifications", JSON.stringify(stored));
-
-        const unreadExists = stored.some(n => !n.read);
-        if (!unreadExists) hideNotificationDot();
-    });
-
-    const readBtn = div.querySelector(".notif-read-btn");
-    const deleteBtn = div.querySelector(".notif-delete-btn");
-
-    // MARK READ
-    readBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        div.classList.remove("unread");
-
-        let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-        stored = stored.map(n =>
-            n.id === notification.id ? { ...n, read: true } : n
-        );
-        localStorage.setItem("appNotifications", JSON.stringify(stored));
-
-        const unreadExists = stored.some(n => !n.read);
-        if (!unreadExists) hideNotificationDot();
-    });
-
-    // DELETE
-    deleteBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        // 1. Remove from DOM
-        div.remove();
-
-        // 2. Remove from localStorage
-        let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-        stored = stored.filter(n => n.id !== notification.id);
-        localStorage.setItem("appNotifications", JSON.stringify(stored));
-
-        // 3. Update red dot
-        const unreadExists = stored.some(n => !n.read);
-        if (!unreadExists) hideNotificationDot();
-
-        if (stored.length === 0) {
-            notificationsContainer.innerHTML = `
-            <div class="empty-state">
-                <span style="font-size: 24px; display:block; margin-bottom:10px;">🔕</span>
-                No new alerts
-            </div>
-        `;
-        }
-    });
-    notificationsContainer.prepend(div);
-}
-
-function loadStoredNotifications() {
-    const stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-
-    if (!stored.length) return;
-
-    stored.forEach(n => addNotificationToPanel(n));
-
-    const unreadExists = stored.some(n => !n.read);
-    if (unreadExists) showNotificationDot();
-}
-
-loadStoredNotifications();
-
-// --- NATIVE OS NOTIFICATION INTERCEPTOR ---
-async function listenToOSNotifications() {
-    const LocalNotifications = getLocalNotifications();
-    if (!LocalNotifications) return;
-
-    await LocalNotifications.addListener('localNotificationReceived', (notification) => {
-        // Construct the alert data
-        const newAlert = {
-            id: notification.id || Date.now(),
-            title: notification.title || "Astronomy Alert",
-            body: notification.body || "A celestial event is happening.",
-            time: new Date().toISOString(),
-            read: false
-        };
-
-        // Get storage, prevent duplicates, and save
-        let stored = JSON.parse(localStorage.getItem("appNotifications") || "[]");
-        if (!stored.find(n => n.id === newAlert.id)) {
-            stored.unshift(newAlert);
-            localStorage.setItem("appNotifications", JSON.stringify(stored));
-
-            // Push immediately to UI
-            addNotificationToPanel(newAlert);
-            showNotificationDot();
-        }
-    });
-}
-listenToOSNotifications();
-
-// ================= YEAR UPDATE CHECK =================
-
-async function checkForNewYear() {
-
-    try {
-
-        const res = await fetch(`${API_BASE}/api/meta/latest-year`);
-        const data = await res.json();
-
-        const latest = data.latest_year;
-
-        const storedYears = JSON.parse(
-            localStorage.getItem("availableYears") || "[2026]"
-        );
-
-        if (!storedYears.includes(latest)) {
-
-            console.log("New year detected:", latest);
-
-            const bundleRes = await fetch(
-                `${API_BASE}/bundles/year_${latest}.json`
-            );
-
-            const bundle = await bundleRes.json();
-
-            localStorage.setItem(
-                `year_${latest}`,
-                JSON.stringify(bundle)
-            );
-
-            storedYears.push(latest);
-            localStorage.setItem(
-                "availableYears",
-                JSON.stringify(storedYears)
-            );
-
-            console.log("New year downloaded silently.");
-
-        }
-
-    } catch (e) {
-
-        console.log("No internet or no new year available.");
-
-    }
-}
 
 // ================= VERSION CHECK =================
 
