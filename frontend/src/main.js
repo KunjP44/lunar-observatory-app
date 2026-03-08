@@ -1,4 +1,4 @@
-const ASSET_BASE = "";
+const ASSET_BASE = "/";
 const IS_LOCAL =
     location.hostname === "localhost" ||
     location.hostname === "127.0.0.1";
