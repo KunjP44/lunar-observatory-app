@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Database
+lunar.db
+*.db
+
+# Firebase secret
+backend/firebase_service_account.json
+
+# Generated moon data
+frontend/public/data/moon/
+
+# OS
+.DS_Store
+Thumbs.db
