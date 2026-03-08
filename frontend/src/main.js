@@ -1,4 +1,4 @@
-const ASSET_BASE = "./public/";
+const ASSET_BASE = "";
 const IS_LOCAL =
     location.hostname === "localhost" ||
     location.hostname === "127.0.0.1";
@@ -742,6 +742,7 @@ canvas.addEventListener("mouseleave", () => {
 
 // 3. Mouse Move: HANDLE ROTATION
 canvas.addEventListener("mousemove", (e) => {
+    if (!isMouseDown) return;
     // Cursor Logic
     pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
     pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
