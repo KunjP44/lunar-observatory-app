@@ -163,6 +163,9 @@ function updateMoonCards(data) {
     document.getElementById("ui-paksha").textContent = data.paksha;
     document.getElementById("ui-nakshatra").textContent = data.constellation;
 
+    const rashi = getRashiFromNakshatra(data.constellation);
+    document.getElementById("ui-rashi").textContent = rashi;
+
     // ---------------- PHYSICS ----------------
     document.getElementById("ui-distance").textContent =
         `${data.distance_km.toLocaleString()} km`;
@@ -2278,6 +2281,50 @@ function renderPlanetVisibility(data) {
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function getRashiFromNakshatra(nakshatra) {
+
+    const map = {
+
+        "Ashwini": "Aries (Mesha)",
+        "Bharani": "Aries (Mesha)",
+        "Krittika": "Aries / Taurus",
+
+        "Rohini": "Taurus (Vrishabha)",
+        "Mrigashira": "Taurus / Gemini",
+        "Ardra": "Gemini (Mithuna)",
+
+        "Punarvasu": "Gemini / Cancer",
+        "Pushya": "Cancer (Karka)",
+        "Ashlesha": "Cancer (Karka)",
+
+        "Magha": "Leo (Simha)",
+        "Purva Phalguni": "Leo (Simha)",
+        "Uttara Phalguni": "Leo / Virgo",
+
+        "Hasta": "Virgo (Kanya)",
+        "Chitra": "Virgo / Libra",
+        "Swati": "Libra (Tula)",
+
+        "Vishakha": "Libra / Scorpio",
+        "Anuradha": "Scorpio (Vrischika)",
+        "Jyeshtha": "Scorpio (Vrischika)",
+
+        "Mula": "Sagittarius (Dhanu)",
+        "Purva Ashadha": "Sagittarius (Dhanu)",
+        "Uttara Ashadha": "Sagittarius / Capricorn",
+
+        "Shravana": "Capricorn (Makara)",
+        "Dhanishta": "Capricorn / Aquarius",
+        "Shatabhisha": "Aquarius (Kumbha)",
+
+        "Purva Bhadrapada": "Aquarius / Pisces",
+        "Uttara Bhadrapada": "Pisces (Meena)",
+        "Revati": "Pisces (Meena)"
+    };
+
+    return map[nakshatra] || "Unknown";
 }
 
 
