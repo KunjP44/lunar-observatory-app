@@ -161,9 +161,18 @@ function updateMoonCards(data) {
     // ---------------- PANCHANG ----------------
     document.getElementById("ui-tithi").textContent = data.phase;
     document.getElementById("ui-paksha").textContent = data.paksha;
-    document.getElementById("ui-nakshatra").textContent = data.constellation;
+    // Split backend string
+    const rawConstellation = data.constellation || "";
 
-    const rashi = getRashiFromNakshatra(data.constellation);
+    const nakshatra = rawConstellation
+        .split("(")[0]
+        .split("-")[0]
+        .trim();
+
+    const rashi = getRashiFromNakshatra(nakshatra);
+
+    // Update UI
+    document.getElementById("ui-nakshatra").textContent = nakshatra;
     document.getElementById("ui-rashi").textContent = rashi;
 
     // ---------------- PHYSICS ----------------
@@ -739,51 +748,61 @@ canvas.addEventListener("mouseleave", () => {
 });
 
 // 3. Mouse Move: HANDLE ROTATION
-// 3. Mouse Move: HANDLE ROTATION
 canvas.addEventListener("mousemove", (e) => {
-    pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
 
-    // Hover cursor detection (Removed the frame throttle so it updates instantly)
-    if (!isMouseDown) {
-        const hits = raycaster.intersectObjects(clickableObjects, true).filter(h => h.object.visible);
+    // ---------------- HOVER POINTER DETECTION ----------------
+    if (frameCount % 10 === 0) {
+
+        pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+        pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+
+        const hits = raycaster.intersectObjects(clickableObjects, true);
+
         let validHit = false;
+
         for (const h of hits) {
-            if (h.object.visible) {
-                let o = h.object;
-                while (o.parent && !o.userData.id) o = o.parent;
-                if (o.userData.id) { validHit = true; break; }
+
+            let obj = h.object;
+
+            while (obj.parent && !obj.userData.id) {
+                obj = obj.parent;
+            }
+
+            if (obj.userData?.id) {
+                validHit = true;
+                break;
             }
         }
-        document.body.style.cursor = validHit ? "pointer" : "default";
-        return;
+
+        renderer.domElement.style.cursor = validHit ? "pointer" : "default";
     }
 
-    // If mouse is down and moving, we are dragging
+    // ---------------- DRAG ROTATION ----------------
+    if (!isMouseDown) return;
+
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
 
-    // Small deadzone to differentiate a click from a drag
-    if (!isDragging && Math.abs(dx) < 4 && Math.abs(dy) < 4) {
+    if (!isDragging && Math.abs(dx) < 5 && Math.abs(dy) < 5) {
         return;
     }
+
     isDragging = true;
 
     if (cameraMode === "lunar" && draggingMoon) {
         planetMeshes.moon.rotation.y += dx * 0.007;
     } else if (cameraMode !== "lunar") {
-        const ROTATE_SPEED = 0.0035;
 
-        // FIX: Changed += to -= so the rotation follows your mouse naturally (grab & pull)
-        targetTheta -= dx * ROTATE_SPEED;
+        const ROTATE_SPEED = isMobile ? 0.0012 : 0.0035;
+
+        targetTheta += dx * ROTATE_SPEED;
         targetPhi -= dy * ROTATE_SPEED;
 
-        // Clamp the target immediately so we don't flip over
         targetPhi = THREE.MathUtils.clamp(targetPhi, 0.1, Math.PI - 0.1);
     }
 
-    // Always update last position
     lastX = e.clientX;
     lastY = e.clientY;
 });
@@ -2285,6 +2304,14 @@ function capitalize(str) {
 
 function getRashiFromNakshatra(nakshatra) {
 
+    if (!nakshatra) return "Unknown";
+
+    // Extract only the Nakshatra name before "(" or "-"
+    nakshatra = nakshatra
+        .split("(")[0]
+        .split("-")[0]
+        .trim();
+
     const map = {
 
         "Ashwini": "Aries (Mesha)",
@@ -2326,7 +2353,6 @@ function getRashiFromNakshatra(nakshatra) {
 
     return map[nakshatra] || "Unknown";
 }
-
 
 // Init Data
 (async () => {
